@@ -5,6 +5,9 @@ import { Header } from '@/components/Header';
 import { KandidatenProfile } from '@/components/kandidaten-profile';
 import { useParams } from 'next/navigation';
 import type { Kandidat, AccountManager, NavigationItem } from '@/types/kandidat';
+// Importiere format und de von date-fns
+import { format } from 'date-fns';
+import { de } from 'date-fns/locale';
 
 interface ParsedResume {
   parsed: {
@@ -12,44 +15,42 @@ interface ParsedResume {
     title: string;
     brief: string;
     contact: {
-      location_city: string;
-      location_country: string;
-      email: string;
-      phone: string;
-      linkedin: string;
-      github: string | null;
-      twitter: string | null;
-      website: string | null;
+      location_city?: string | null; // Make optional/nullable
+      location_country?: string | null; // Make optional/nullable
+      email?: string | null; // Make optional/nullable
+      phone?: string | null; // Make optional/nullable
+      linkedin?: string | null;
+      github?: string | null;
+      twitter?: string | null;
+      website?: string | null;
     };
-    employment_history: Array<{
-      company: string;
-      position: string;
-      startDate: string;
-      endDate: string;
-      description: string[];
-    }>;
-    education: Array<{
-      degree: string;
-      institution: string;
-      graduationDate: string;
-    }>;
-    skills: string[];
-    languages: string[];
-    derived: {
-      years_of_experience: number;
-      approximate_age: number;
-    };
+    employment_history?: Array<{ // Make optional
+      company?: string | null; // Make optional/nullable
+      position?: string | null; // Make optional/nullable
+      startDate?: string | null; // Make optional/nullable
+      endDate?: string | null; // Make optional/nullable
+      description?: string[] | null; // Make optional/nullable
+    }> | null; // Make nullable
+    education?: Array<{ // Make optional
+      degree?: string | null; // Make optional/nullable
+      institution?: string | null; // Make optional/nullable
+      graduationDate?: string | null; // Make optional/nullable
+    }> | null; // Make nullable
+    skills?: string[] | null; // Make optional/nullable
+    languages?: string[] | null; // Make optional/nullable
+    derived?: { // Make optional
+      years_of_experience?: number | null; // Make optional/nullable
+      approximate_age?: number | null; // Make optional/nullable
+    } | null; // Make nullable
   };
-  fileName: string;
-  uploadedAt: {
-    _seconds: number;
-    _nanoseconds: number;
-  };
+  fileName?: string | null; // Make optional/nullable
+  uploadedAt?: string | null; // Should be a string in ISO format from Supabase, make optional/nullable
 }
 
 export default function CandidateDetailsPage() {
   const { id } = useParams();
   const [resumeData, setResumeData] = useState<ParsedResume | null>(null);
+  const [kandidatData, setKandidatData] = useState<Kandidat | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,11 +59,16 @@ export default function CandidateDetailsPage() {
       try {
         const response = await fetch(`/api/resume/${id}`);
         if (!response.ok) {
-          throw new Error('Failed to fetch resume data');
+          // Versuche, die Fehlermeldung vom Server zu lesen
+          const errorText = await response.text();
+          throw new Error(`Failed to fetch resume data: ${response.status} ${response.statusText} - ${errorText}`);
         }
-        const data = await response.json();
+        const data: ParsedResume = await response.json();
         setResumeData(data);
+        // Map the fetched data to Kandidat format here after data is set
+        setKandidatData(mapResumeToKandidat(data));
       } catch (err) {
+        console.error("Error fetching or processing resume data:", err);
         setError(err instanceof Error ? err.message : 'Failed to fetch resume data');
       } finally {
         setLoading(false);
@@ -72,99 +78,106 @@ export default function CandidateDetailsPage() {
     if (id) {
       fetchResumeData();
     }
-  }, [id]);
+  }, [id]); // Abhängigkeit vom id-Parameter
 
-  const formatDate = (dateStr: string): string => {
+  // Helper function to safely get nested properties
+  const safeGet = <T, K extends keyof T>(obj: T | null | undefined, key: K): T[K] | undefined => {
+    return obj?.[key];
+  };
+
+  const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '';
-    if (dateStr === 'Present') return 'Heute';
+    if (dateStr.toLowerCase() === 'present') return 'Heute';
     try {
-      // Try parsing different date formats
-      let date;
-      if (dateStr.includes('-')) {
-        // Handle YYYY-MM-DD format
-        date = new Date(dateStr);
-      } else if (dateStr.match(/^\d{4}$/)) {
-        // Handle year only format
-        date = new Date(parseInt(dateStr), 0, 1);
-      } else {
-        // Try parsing as is
-        date = new Date(dateStr);
+      // date-fns parseISO can handle ISO strings directly
+      const date = new Date(dateStr);
+
+      if (isNaN(date.getTime())) {
+        // Wenn das native Parsing fehlschlägt, gib den Original-String zurück oder handle es anders
+        console.warn("Could not parse date string:", dateStr);
+        return dateStr;
       }
-      
-      if (isNaN(date.getTime())) return dateStr;
-      return new Intl.DateTimeFormat('de-DE', { 
-        year: 'numeric', 
-        month: 'long'
-      }).format(date);
-    } catch {
+
+      // Verwenden Sie date-fns zum Formatieren des Datums mit dem importierten de Locale
+      return format(date, 'MMMM yyyy', { locale: de });
+    } catch (e) {
+      console.error("Error formatting date:", dateStr, e);
       return dateStr;
     }
   };
 
   const mapResumeToKandidat = (resume: ParsedResume): Kandidat => {
+    const parsed = resume.parsed;
+
     return {
-      name: resume.parsed.name,
-      position: resume.parsed.title,
+      name: safeGet(parsed, 'name') || '',
+      position: safeGet(parsed, 'title') || '',
       gehalt: 'Auf Anfrage', // Default value
-      standort: `${resume.parsed.contact.location_city}, ${resume.parsed.contact.location_country}`,
+      standort: `${safeGet(parsed?.contact, 'location_city') || ''}${safeGet(parsed?.contact, 'location_city') && safeGet(parsed?.contact, 'location_country') ? ', ' : ''}${safeGet(parsed?.contact, 'location_country') || ''}`,
       verfuegbarkeit: 'Sofort', // Default value
-      erfahrung: `${resume.parsed.derived.years_of_experience} Jahre`,
+      erfahrung: `${safeGet(parsed?.derived, 'years_of_experience') ?? 0} Jahre`, // Nutze Nullish Coalescing
       location: {
-        address: 'wewewewewe',
-        postalCode: '',
-        city: resume.parsed.contact.location_city,
-        countryCode: resume.parsed.contact.location_country,
-        region: ''
+        address: '', // Annahme: nicht im ParsedResume
+        postalCode: '', // Annahme: nicht im ParsedResume
+        city: safeGet(parsed?.contact, 'location_city') || '',
+        countryCode: safeGet(parsed?.contact, 'location_country') || '',
+        region: '' // Annahme: nicht im ParsedResume
       },
-      kurzprofil: resume.parsed.brief,
+      kurzprofil: safeGet(parsed, 'brief') || '',
       lebenslauf: '', // Will be populated from normalized_text if needed
-      einschaetzung: resume.parsed.brief,
-      senioritaet: resume.parsed.derived.years_of_experience > 5 ? 'Senior' : 'Mid-Level',
-      jobrollen: [resume.parsed.title],
-      kernthemen: resume.parsed.skills,
+      einschaetzung: safeGet(parsed, 'brief') || '', // Annahme: gleicher Wert wie kurzprofil
+      senioritaet: (safeGet(parsed?.derived, 'years_of_experience') ?? 0) > 5 ? 'Senior' : 'Mid-Level',
+      jobrollen: [safeGet(parsed, 'title')].filter(Boolean), // Filtere leere Werte
+      kernthemen: safeGet(parsed, 'skills') || [],
       persoenlicheDaten: {
-        geburtsdatum: '',
-        geburtsort: '',
-        wohnort: resume.parsed.contact.location_city,
-        familienstand: ''
+        geburtsdatum: '', // Annahme: nicht im ParsedResume
+        geburtsort: '', // Annahme: nicht im ParsedResume
+        wohnort: safeGet(parsed?.contact, 'location_city') || '',
+        familienstand: '' // Annahme: nicht im ParsedResume
       },
-      softwareKenntnisse: resume.parsed.skills.map(skill => ({
-        name: skill,
+      softwareKenntnisse: (safeGet(parsed, 'skills') || []).map(skill => ({
+        name: skill || '',
         level: 80 // Default level
       })),
-      sprachkenntnisse: resume.parsed.languages.map(lang => ({
-        sprache: lang,
-        niveau: 'Fließend', // Default value
-        level: 80 // Default level
+      sprachkenntnisse: (safeGet(parsed, 'languages') || []).map(lang => {
+        // Annahme: lang ist ein String oder ein Objekt { language: string, fluency: string }
+         return {
+           sprache: (typeof lang === 'object' && lang !== null ? safeGet(lang, 'language') : lang) || '', // Handle both string and object format
+           niveau: (typeof lang === 'object' && lang !== null ? safeGet(lang, 'fluency') : 'Fließend') || 'Fließend', // Default or use fluency from object
+           level: 80 // Default level
+         };
+      }),
+      highlights: [], // Annahme: nicht im ParsedResume
+      topSkills: (safeGet(parsed, 'skills') || []).slice(0, 3).map(skill => ({
+        title: skill || '',
+        description: '', // Annahme: nicht im ParsedResume
+        keywords: [] // Annahme: nicht im ParsedResume
       })),
-      highlights: [],
-      topSkills: resume.parsed.skills.slice(0, 3).map(skill => ({
-        title: skill,
-        description: '',
-        keywords: []
+      work: (safeGet(parsed, 'employment_history') || []).map(job => ({
+        name: safeGet(job, 'company') || '',
+        position: safeGet(job, 'position') || '',
+        startDate: formatDate(safeGet(job, 'startDate')),
+        endDate: safeGet(job, 'endDate')?.toLowerCase() === 'present' ? 'Heute' : formatDate(safeGet(job, 'endDate')), // Check for null/undefined and lowercase 'present'
+        summary: Array.isArray(safeGet(job, 'description')) ? safeGet(job, 'description')?.join('\n') || '' : safeGet(job, 'description') || '',
+        achievements: Array.isArray(safeGet(job, 'description')) ? safeGet(job, 'description') || [] : []
       })),
-      work: resume.parsed.employment_history.map(job => ({
-        name: job.company,
-        position: job.position,
-        startDate: formatDate(job.startDate),
-        endDate: job.endDate === 'Present' ? 'Heute' : formatDate(job.endDate),
-        summary: Array.isArray(job.description) ? job.description.join('\n') : job.description || '',
-        achievements: Array.isArray(job.description) ? job.description : []
+      education: (safeGet(parsed, 'education') || []).map(edu => ({
+        institution: safeGet(edu, 'institution') || '',
+        url: '', // Annahme: nicht im ParsedResume
+        area: safeGet(edu, 'degree') || '',
+        studyType: safeGet(edu, 'degree') || '', // Annahme: gleicher Wert wie degree
+        startDate: formatDate(safeGet(edu, 'graduationDate')),
+        endDate: formatDate(safeGet(edu, 'graduationDate')), // Annahme: Enddatum = Startdatum für Bildung
+        note: '' // Annahme: nicht im ParsedResume
       })),
-      education: resume.parsed.education.map(edu => ({
-        institution: edu.institution,
-        url: '',
-        area: edu.degree,
-        studyType: edu.degree,
-        startDate: formatDate(edu.graduationDate),
-        endDate: formatDate(edu.graduationDate),
-        note: ''
-      })),
-      certificates: [],
-      languages: resume.parsed.languages.map(lang => ({
-        language: lang,
-        fluency: 'Fließend' // Default value
-      }))
+      certificates: [], // Annahme: nicht im ParsedResume
+      languages: (safeGet(parsed, 'languages') || []).map(lang => {
+         // Passe dies an, falls lang ein Objekt { language: string, fluency: string } ist, basierend auf dem tatsächlichen ParsedResume
+         return {
+           language: (typeof lang === 'object' && lang !== null ? safeGet(lang, 'language') : lang) || '', // Handle both string and object format
+           fluency: (typeof lang === 'object' && lang !== null ? safeGet(lang, 'fluency') : 'Fließend') || 'Fließend' // Default or use fluency from object
+         };
+      })
     };
   };
 
@@ -175,21 +188,24 @@ export default function CandidateDetailsPage() {
     phone: '+49 123 456789'
   };
 
-  const generateNavSections = (resume: ParsedResume): NavigationItem[] => {
+  const generateNavSections = (resume: ParsedResume | null): NavigationItem[] => {
+     if (!resume?.parsed) return []; // Return empty array if no parsed data
+
     const sections: NavigationItem[] = [
       { id: 'profile', label: 'Profil' }
     ];
 
-    if (resume.parsed.employment_history.length > 0) {
+    // Füge Sektionen nur hinzu, wenn die entsprechenden Daten vorhanden sind
+    if (resume.parsed.employment_history && resume.parsed.employment_history.length > 0) {
       sections.push({ id: 'experience', label: 'Erfahrung' });
     }
-    if (resume.parsed.education.length > 0) {
+    if (resume.parsed.education && resume.parsed.education.length > 0) {
       sections.push({ id: 'education', label: 'Ausbildung' });
     }
-    if (resume.parsed.skills.length > 0) {
+    if (resume.parsed.skills && resume.parsed.skills.length > 0) {
       sections.push({ id: 'skills', label: 'Fähigkeiten' });
     }
-    if (resume.parsed.languages.length > 0) {
+    if (resume.parsed.languages && resume.parsed.languages.length > 0) {
       sections.push({ id: 'languages', label: 'Sprachen' });
     }
 
@@ -206,15 +222,15 @@ export default function CandidateDetailsPage() {
         <div className="text-center text-red-600 min-h-[400px] flex items-center justify-center">
           {error}
         </div>
-      ) : resumeData ? (
+      ) : kandidatData ? ( // Rendere nur, wenn kandidatData vorhanden ist
         <div className="bg-white">
           <KandidatenProfile
-            kandidat={mapResumeToKandidat(resumeData)}
+            kandidat={kandidatData} // Verwende gemappte Daten
             accountManager={mockAccountManager}
-            navSections={generateNavSections(resumeData)}
+            navSections={generateNavSections(resumeData)} // generateNavSections benötigt resumeData (optional jetzt)
           />
         </div>
-      ) : null}
+      ) : null} {/* Zeige nichts an, wenn keine Daten oder ein Fehler vorliegt */}
     </main>
   );
-} 
+}
