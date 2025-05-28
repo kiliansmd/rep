@@ -58,78 +58,139 @@ export async function POST(request: Request) {
       );
     }
 
-    // Im Entwicklungsmodus verwenden wir Dummy-Daten
+    // In development, return dummy data
     if (process.env.NODE_ENV === 'development') {
+      const dummyResumeData = {
+        candidate: {
+          name: "John Doe",
+          email: "john.doe@example.com",
+          phone: "+1234567890",
+          summary: "Experienced software developer with a focus on web technologies.",
+          location: "New York, USA"
+        },
+        workExperience: [
+          {
+            company: "Tech Corp",
+            position: "Senior Developer",
+            startDate: "2020-01",
+            endDate: "Present",
+            description: "Led development of multiple web applications."
+          }
+        ],
+        education: [
+          {
+            institution: "University of Technology",
+            degree: "Bachelor of Science",
+            field: "Computer Science",
+            startDate: "2016-09",
+            endDate: "2020-06"
+          }
+        ],
+        skills: ["JavaScript", "React", "Node.js", "TypeScript"],
+        languages: ["English", "Spanish"]
+      };
+
+      // Store in Supabase
       const { data, error } = await supabase
         .from('resumes')
         .insert([
           {
-            ...dummyResumeData,
-            fileName: file.name,
-            uploadedAt: new Date().toISOString(),
+            name: dummyResumeData.candidate.name,
+            label: dummyResumeData.candidate.name,
+            email: dummyResumeData.candidate.email,
+            phone: dummyResumeData.candidate.phone,
+            summary: dummyResumeData.candidate.summary,
+            location: dummyResumeData.candidate.location,
+            file_name: file.name,
+            upload_date: new Date().toISOString(),
+            parsed_data: dummyResumeData
           }
         ])
         .select()
         .single();
 
       if (error) {
-        throw error;
+        console.error('Error storing dummy data:', error);
+        return NextResponse.json(
+          { error: 'Failed to store resume data' },
+          { status: 500 }
+        );
       }
 
       return NextResponse.json({
-        ...data,
-        message: 'Resume parsed and stored successfully (Development Mode)'
+        success: true,
+        message: 'Resume parsed successfully (dummy data)',
+        data: dummyResumeData
       });
     }
 
-    // Produktionsmodus
+    // In production, use the Resume Parser API
     if (!process.env.NEXT_PUBLIC_RESUME_PARSER_API) {
-      throw new Error('RESUME_PARSER_API_KEY is not defined in environment variables');
+      return NextResponse.json(
+        { error: 'Resume Parser API key not configured' },
+        { status: 500 }
+      );
     }
 
-    const uploadFormData = new FormData();
-    uploadFormData.append('file', file);
+    const formDataForApi = new FormData();
+    formDataForApi.append('file', file);
 
-    const response = await fetch('https://resumeparser.app/resume/parse', {
+    const response = await fetch('https://api.resumeparser.io/api/v1/parser/resume', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_RESUME_PARSER_API}`
+        'apikey': process.env.NEXT_PUBLIC_RESUME_PARSER_API
       },
-      body: uploadFormData,
+      body: formDataForApi
     });
 
     if (!response.ok) {
-      throw new Error(`Resume parser API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Resume Parser API error:', errorText);
+      return NextResponse.json(
+        { error: 'Failed to parse resume' },
+        { status: response.status }
+      );
     }
 
     const parsedData = await response.json();
 
-    // Speichere in Supabase
-    const { data: supabaseData, error: supabaseError } = await supabase
+    // Store in Supabase
+    const { data, error } = await supabase
       .from('resumes')
       .insert([
         {
-          ...parsedData,
-          fileName: file.name,
-          uploadedAt: new Date().toISOString(),
+          name: parsedData.candidate.name,
+          label: parsedData.candidate.name,
+          email: parsedData.candidate.email,
+          phone: parsedData.candidate.phone,
+          summary: parsedData.candidate.summary,
+          location: parsedData.candidate.location,
+          file_name: file.name,
+          upload_date: new Date().toISOString(),
+          parsed_data: parsedData
         }
       ])
       .select()
       .single();
 
-    if (supabaseError) {
-      throw supabaseError;
+    if (error) {
+      console.error('Error storing resume data:', error);
+      return NextResponse.json(
+        { error: 'Failed to store resume data' },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
-      ...supabaseData,
-      message: 'Resume parsed and stored successfully'
+      success: true,
+      message: 'Resume parsed successfully',
+      data: parsedData
     });
 
   } catch (error) {
     console.error('Error processing resume:', error);
     return NextResponse.json(
-      { error: 'Failed to process resume' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
