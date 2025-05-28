@@ -11,10 +11,10 @@ import { de } from 'date-fns/locale';
 
 interface ParsedResume {
   parsed: {
-    name: string;
-    title: string;
-    brief: string;
-    contact: {
+    name?: string | null; // Make optional/nullable
+    title?: string | null; // Make optional/nullable
+    brief?: string | null; // Make optional/nullable
+    contact?: { // Make optional
       location_city?: string | null; // Make optional/nullable
       location_country?: string | null; // Make optional/nullable
       email?: string | null; // Make optional/nullable
@@ -23,7 +23,7 @@ interface ParsedResume {
       github?: string | null;
       twitter?: string | null;
       website?: string | null;
-    };
+    } | null; // Make nullable
     employment_history?: Array<{ // Make optional
       company?: string | null; // Make optional/nullable
       position?: string | null; // Make optional/nullable
@@ -66,7 +66,9 @@ export default function CandidateDetailsPage() {
         const data: ParsedResume = await response.json();
         setResumeData(data);
         // Map the fetched data to Kandidat format here after data is set
+        // This part runs on the client after fetching
         setKandidatData(mapResumeToKandidat(data));
+
       } catch (err) {
         console.error("Error fetching or processing resume data:", err);
         setError(err instanceof Error ? err.message : 'Failed to fetch resume data');
